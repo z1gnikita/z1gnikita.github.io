@@ -34,6 +34,85 @@ const CFG = {
 };
 
 // ============================================================
+// PIECEWISE X SCALE
+// The fine region [0, SCALE_BREAKPOINT] takes SCALE_LOW_FRACTION
+// of the total chart width; the coarse region takes the rest.
+// Falls back to linear when all data is on one side of the breakpoint.
+// ============================================================
+
+const SCALE_BREAKPOINT   = 1;    // V  - boundary between fine and coarse zones
+const SCALE_LOW_FRACTION = 0.78; // fraction of width given to the fine zone
+
+(function registerPiecewiseScale() {
+  const LinearScale = Chart.scales.LinearScale;
+
+  class PiecewiseScale extends LinearScale {
+    _piecewiseActive() {
+      return isFinite(this.min) && isFinite(this.max)
+          && this.min < SCALE_BREAKPOINT
+          && this.max > SCALE_BREAKPOINT;
+    }
+
+    getPixelForValue(value) {
+      if (!isFinite(value)) return NaN;
+      if (!this._piecewiseActive()) return super.getPixelForValue(value);
+
+      const { min, max } = this;
+      const bp = SCALE_BREAKPOINT;
+      const lf = SCALE_LOW_FRACTION;
+
+      let t;
+      if      (value <= min) t = 0;
+      else if (value >= max) t = 1;
+      else if (value <= bp)  t = ((value - min) / (bp - min)) * lf;
+      else                   t = lf + ((value - bp) / (max - bp)) * (1 - lf);
+
+      return this.getPixelForDecimal(t);
+    }
+
+    getValueForPixel(pixel) {
+      if (!this._piecewiseActive()) return super.getValueForPixel(pixel);
+
+      const { min, max } = this;
+      const bp = SCALE_BREAKPOINT;
+      const lf = SCALE_LOW_FRACTION;
+      const t  = Math.max(0, Math.min(1, this.getDecimalForPixel(pixel)));
+
+      if (t <= lf) return min + (t / lf) * (bp - min);
+      return bp + ((t - lf) / (1 - lf)) * (max - bp);
+    }
+
+    buildTicks() {
+      if (!this._piecewiseActive()) return super.buildTicks();
+
+      const { min, max } = this;
+      const bp   = SCALE_BREAKPOINT;
+      const ticks = [];
+
+      // Fine region: step 0.1
+      let v = parseFloat((Math.ceil(min * 10) / 10).toFixed(1));
+      while (v <= bp + 1e-9) {
+        ticks.push({ value: v, major: Math.abs(v - Math.round(v)) < 0.05 });
+        v = parseFloat((v + 0.1).toFixed(1));
+      }
+
+      // Coarse region: step 1
+      let vi = Math.ceil(bp + 1e-9);
+      while (vi <= max + 0.5) {
+        ticks.push({ value: vi, major: true });
+        vi++;
+      }
+
+      return ticks;
+    }
+  }
+
+  PiecewiseScale.id       = 'piecewise';
+  PiecewiseScale.defaults = Object.assign({}, Chart.defaults.scales.linear);
+  Chart.register(PiecewiseScale);
+}());
+
+// ============================================================
 // INITIALIZATION
 // ============================================================
 
@@ -291,38 +370,12 @@ function computeApprox(rawPoints, type) {
     return null;
   }
 
-  // Build smooth curve with denser sampling in the region where data points cluster.
-  // Determine the "dense" region using 10th-90th percentile of X values.
-  const p10x = points[Math.max(0, Math.floor(points.length * 0.1))].x;
-  const p90x = points[Math.min(points.length - 1, Math.ceil(points.length * 0.9))].x;
-  const denseRange = p90x - p10x;
-  const totalRange = xMax - xMin;
-  // If dense range < 20% of total range, allocate 80% of curve points to the dense region.
-  const useDenseSampling = totalRange > 0 && denseRange < totalRange * 0.4;
-
+  // Build smooth curve
   const curve = [];
-  if (useDenseSampling) {
-    const nDense = Math.round(numCurve * 0.75);
-    const nSparse = numCurve - nDense;
-    // Sparse: xMin to p10x and p90x to xMax
-    const nLeft  = Math.round(nSparse * (p10x - xMin) / (totalRange - denseRange + 1e-12));
-    const nRight = nSparse - nLeft;
-    const addSegment = (x0, x1, n) => {
-      for (let i = 0; i <= n; i++) {
-        const x = x0 + (x1 - x0) * (i / Math.max(n, 1));
-        const y = evalFn(x);
-        if (isFinite(y) && !isNaN(y)) curve.push({ x, y });
-      }
-    };
-    if (nLeft > 0)  addSegment(xMin, p10x, nLeft);
-    addSegment(p10x, p90x, nDense);
-    if (nRight > 0) addSegment(p90x, xMax, nRight);
-  } else {
-    for (let i = 0; i <= numCurve; i++) {
-      const x = xMin + (xMax - xMin) * (i / numCurve);
-      const y = evalFn(x);
-      if (isFinite(y) && !isNaN(y)) curve.push({ x, y });
-    }
+  for (let i = 0; i <= numCurve; i++) {
+    const x = xMin + (xMax - xMin) * (i / numCurve);
+    const y = evalFn(x);
+    if (isFinite(y) && !isNaN(y)) curve.push({ x, y });
   }
 
   // Residuals and metrics
@@ -580,10 +633,16 @@ function initChart() {
       },
       scales: {
         x: {
-          type: 'linear',
+          type: 'piecewise',
           title: { display: true, text: cfg.xLabel, font: { size: 12, weight: '500' } },
           grid: { color: '#F1F5F9' },
-          ticks: { font: { size: 11 } }
+          ticks: {
+            font: { size: 11 },
+            autoSkip: true,
+            maxTicksLimit: 30,
+            maxRotation: 0,
+            minRotation: 0
+          }
         },
         y: {
           type: 'linear',
@@ -635,74 +694,6 @@ function onChartClick(event, chart) {
   showToast(hint);
 }
 
-// Compute a "nice" axis tick step targeting ~10 visible ticks for the given range.
-function calcNiceStep(range) {
-  if (range <= 0) return 0.1;
-  const raw = range / 10;
-  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
-  const norm = raw / mag;
-  if (norm <= 1) return mag;
-  if (norm <= 2) return 2 * mag;
-  if (norm <= 5) return 5 * mag;
-  return 10 * mag;
-}
-
-// Update chart axis scales based on actual data bounds.
-// Uses the "dense" X range (10th-90th percentile) to determine tick step,
-// so a few far-out points don't force coarse ticks on the main data region.
-function updateChartScales() {
-  if (!state.chart) return;
-  const allX = [], allY = [];
-
-  state.series.forEach(s => s.points.forEach(p => {
-    allX.push(p.x);
-    allY.push(p.y);
-  }));
-
-  // Also include approximation curve endpoints for Y scaling
-  state.series.forEach(s => {
-    const res = state.approxResults[s.id];
-    if (res && res.curve.length) {
-      res.curve.forEach(p => allY.push(p.y));
-    }
-  });
-
-  if (allX.length === 0) return;
-
-  allX.sort((a, b) => a - b);
-  allY.sort((a, b) => a - b);
-
-  const xMin = allX[0];
-  const xMax = allX[allX.length - 1];
-  const yMin = allY[0];
-  const yMax = allY[allY.length - 1];
-
-  // Use 10th-90th percentile range to derive tick step (avoids outliers inflating step)
-  const p10x = allX[Math.max(0, Math.floor(allX.length * 0.1))];
-  const p90x = allX[Math.min(allX.length - 1, Math.ceil(allX.length * 0.9))];
-  const denseXRange = Math.max(p90x - p10x, (xMax - xMin) * 0.1);
-
-  const p10y = allY[Math.max(0, Math.floor(allY.length * 0.1))];
-  const p90y = allY[Math.min(allY.length - 1, Math.ceil(allY.length * 0.9))];
-  const denseYRange = Math.max(p90y - p10y, (yMax - yMin) * 0.1);
-
-  const xStep = calcNiceStep(denseXRange);
-  const yStep = calcNiceStep(denseYRange);
-
-  // Align min/max to step grid with small padding
-  const xPad = xStep * 0.5;
-  const yPad = yStep * 0.5;
-
-  state.chart.options.scales.x.min = Math.floor(xMin / xStep) * xStep;
-  state.chart.options.scales.x.max = Math.ceil(xMax / xStep) * xStep + xPad;
-  state.chart.options.scales.x.ticks.stepSize = xStep;
-
-  const yFloor = Math.floor(yMin / yStep) * yStep;
-  state.chart.options.scales.y.min = Math.max(0, yFloor);
-  state.chart.options.scales.y.max = Math.ceil(yMax / yStep) * yStep + yPad;
-  state.chart.options.scales.y.ticks.stepSize = yStep;
-}
-
 function renderChart() {
   if (!state.chart) initChart();
   const datasets = [];
@@ -735,8 +726,6 @@ function renderChart() {
   state.chart.data.datasets = datasets;
   state.chart.options.scales.x.title.text = cfg.xLabel;
   state.chart.options.scales.y.title.text = cfg.yLabel;
-
-  updateChartScales();
   state.chart.update('none');
 
   renderLegend();
