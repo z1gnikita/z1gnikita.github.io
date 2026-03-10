@@ -4,7 +4,7 @@
 // STATE
 // ============================================================
 
-const state = {
+var state = {
   charType: 'output',
   series: [],
   activeSeriesId: null,
@@ -13,12 +13,12 @@ const state = {
   chart: null
 };
 
-const COLORS = [
+var COLORS = [
   '#2563EB', '#DC2626', '#16A34A', '#D97706',
   '#7C3AED', '#0891B2', '#DB2777', '#059669'
 ];
 
-const CFG = {
+var CFG = {
   output: {
     xLabel: 'U_CE, В', yLabel: 'I_C, мА',
     xHeader: 'U_CE (В)', yHeader: 'I_C (мА)',
@@ -40,11 +40,13 @@ const CFG = {
 // Falls back to linear when all data is on one side of the breakpoint.
 // ============================================================
 
-const SCALE_BREAKPOINT   = 1;    // V  - boundary between fine and coarse zones
-const SCALE_LOW_FRACTION = 0.78; // fraction of width given to the fine zone
+var SCALE_BREAKPOINT   = 1;
+var SCALE_LOW_FRACTION = 0.78;
 
 (function registerPiecewiseScale() {
-  const LinearScale = Chart.registry.getScale('linear');
+  if (typeof Chart === 'undefined' || !Chart.registry) return;
+  var LinearScale = Chart.registry.getScale('linear');
+  if (!LinearScale) return;
 
   class PiecewiseScale extends LinearScale {
     _piecewiseActive() {
@@ -1517,7 +1519,7 @@ function importCSV(event) {
 // SESSION MANAGEMENT
 // ============================================================
 
-const SESSIONS_KEY = 'vah_sessions_v1';
+var SESSIONS_KEY = 'vah_sessions_v1';
 
 function getSessions() {
   try { return JSON.parse(localStorage.getItem(SESSIONS_KEY) || '[]'); } catch { return []; }
