@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#2563EB">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>VAH Assistant</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header class="app-header">
+    <span class="app-title">VAH Assistant</span>
+    <div class="header-right">
+      <!-- Save session -->
+      <button class="hdr-icon-btn" title="Зберегти сесію" onclick="openSaveSession()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+          <polyline points="17 21 17 13 7 13 7 21"/>
+          <polyline points="7 3 7 8 15 8"/>
+        </svg>
+      </button>
+      <!-- Load session -->
+      <button class="hdr-icon-btn" title="Завантажити сесію" onclick="openLoadSessions()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          <line x1="12" y1="11" x2="12" y2="17"/>
+          <polyline points="9 14 12 17 15 14"/>
+        </svg>
+      </button>
+      <div class="char-toggle">
+        <button id="btn-input" class="char-btn" onclick="setCharType('input')">Вхідна</button>
+        <button id="btn-output" class="char-btn active" onclick="setCharType('output')">Вихідна</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="main-content">
+
+    <!-- ==================== DATA TAB ==================== -->
+    <section class="tab-pane active" id="pane-data">
+
+      <div id="series-section" class="card">
+        <div class="card-title">Сімейство кривих</div>
+        <div id="series-chips" class="chips-row"></div>
+        <div class="row-form">
+          <div class="field">
+            <label id="series-param-label">I<sub>B</sub>, мкА</label>
+            <input type="number" id="series-param-input" step="any" inputmode="decimal" placeholder="10">
+          </div>
+          <button class="btn btn-primary btn-add-series" onclick="addSeries()">+</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title" id="point-input-title">Додати точку</div>
+        <div class="two-col-form">
+          <div class="field">
+            <label id="lbl-x">U<sub>CE</sub>, В</label>
+            <input type="number" id="inp-x" step="any" inputmode="decimal" placeholder="0.000">
+          </div>
+          <div class="field">
+            <label id="lbl-y">I<sub>C</sub>, мА</label>
+            <input type="number" id="inp-y" step="any" inputmode="decimal" placeholder="0.000">
+          </div>
+        </div>
+        <button class="btn btn-primary btn-full" onclick="addPoint()">Додати точку</button>
+      </div>
+
+      <div class="card">
+        <div class="card-header-row">
+          <span class="card-title">Точки вимірювань</span>
+          <div class="table-btns">
+            <button class="btn btn-sm" onclick="clearPoints()">Очистити</button>
+            <button class="btn btn-sm" onclick="exportCSV()">CSV</button>
+            <label class="btn btn-sm" for="inp-import">Імпорт</label>
+            <input type="file" id="inp-import" accept=".csv" hidden onchange="importCSV(event)">
+          </div>
+        </div>
+        <div class="table-scroll">
+          <table id="tbl-points">
+            <thead>
+              <tr>
+                <th id="th-x">X</th>
+                <th id="th-y">Y</th>
+                <th class="col-del"></th>
+              </tr>
+            </thead>
+            <tbody id="tbody-points"></tbody>
+          </table>
+        </div>
+        <div id="no-points-msg" class="empty-msg">Немає точок. Додайте першу точку вище.</div>
+      </div>
+
+    </section>
+
+    <!-- ==================== GRAPH TAB ==================== -->
+    <section class="tab-pane" id="pane-graph">
+
+      <div class="card approx-toolbar">
+        <select id="sel-approx">
+          <option value="spline">Кубічний сплайн</option>
+          <option value="poly2">Поліном 2-го ступеня</option>
+          <option value="poly3">Поліном 3-го ступеня</option>
+          <option value="poly4">Поліном 4-го ступеня</option>
+          <option value="exp">Експоненціальна</option>
+          <option value="none">Без апроксимації</option>
+        </select>
+        <button class="btn btn-primary" onclick="runApproximation()">Побудувати</button>
+      </div>
+
+      <div class="card chart-card">
+        <div class="chart-click-hint" id="chart-click-hint">
+          Натисніть на графік — X заповниться автоматично
+        </div>
+        <div class="chart-wrap">
+          <canvas id="chart-canvas"></canvas>
+        </div>
+      </div>
+
+      <!-- Measurement plan (shown after approximation) -->
+      <div class="card" id="meas-plan-card" style="display:none">
+        <div class="card-title">План вимірювань</div>
+        <div id="meas-plan-series-info" class="meas-info"></div>
+
+        <div class="meas-slider-block">
+          <div class="meas-slider-label-row">
+            <span>Бажана кількість точок:</span>
+            <strong id="meas-pts-display">20</strong>
+          </div>
+          <div class="meas-slider-wrap">
+            <span class="meas-edge" id="meas-min-label">5</span>
+            <input type="range" id="meas-pts-slider" min="5" max="100" value="20"
+              oninput="onMeasSlider(this.value)">
+            <span class="meas-edge" id="meas-max-label">100</span>
+            <input type="number" id="meas-pts-num" min="5" max="100" value="20"
+              inputmode="numeric" oninput="onMeasNum(this.value)">
+          </div>
+        </div>
+
+        <div id="meas-plan-summary" class="meas-summary"></div>
+        <button class="btn btn-primary btn-full" style="margin-top:10px" onclick="generateMeasurementPlan()">
+          Згенерувати список
+        </button>
+        <div id="meas-plan-list"></div>
+      </div>
+
+      <!-- Suggested intermediate points (shown after approximation) -->
+      <div class="card" id="suggested-pts-card" style="display:none">
+        <div class="card-header-row">
+          <span class="card-title">Рекомендовані проміжні точки</span>
+          <span class="pts-badge" id="suggested-pts-count">0</span>
+        </div>
+        <div id="suggested-pts-content"></div>
+      </div>
+
+      <!-- Legend -->
+      <div id="chart-legend" class="card legend-card"></div>
+
+      <!-- All points below graph -->
+      <div class="card">
+        <div class="card-header-row">
+          <span class="card-title">Всі точки</span>
+          <span class="pts-badge" id="graph-pts-count">0</span>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th id="gph-th-series">Крива</th>
+                <th id="gph-th-x">X</th>
+                <th id="gph-th-y">Y</th>
+                <th id="gph-th-approx">Апрокс.</th>
+                <th id="gph-th-err">Похибка</th>
+                <th class="col-del"></th>
+              </tr>
+            </thead>
+            <tbody id="graph-pts-tbody"></tbody>
+          </table>
+        </div>
+        <div id="graph-pts-empty" class="empty-msg">Немає точок. Додайте точки на вкладці Дані.</div>
+      </div>
+
+    </section>
+
+    <!-- ==================== ANALYSIS TAB ==================== -->
+    <section class="tab-pane" id="pane-analysis">
+
+      <div class="card">
+        <div class="card-title">Точність апроксимації</div>
+        <div id="metrics-content">
+          <div class="empty-msg">Спочатку побудуйте апроксимацію на вкладці Графік.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Де виміряти наступну точку?</div>
+        <div id="suggestions-content">
+          <div class="empty-msg">Після апроксимації з'являться рекомендації.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Оцінка достатності даних</div>
+        <div id="sufficiency-content">
+          <div class="empty-msg">Додайте більше точок для оцінки.</div>
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- Bottom navigation -->
+  <nav class="bottom-nav">
+    <button class="nav-btn active" onclick="switchTab('data', this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="2"/>
+        <line x1="3" y1="9" x2="21" y2="9"/>
+        <line x1="3" y1="15" x2="21" y2="15"/>
+        <line x1="9" y1="9" x2="9" y2="21"/>
+      </svg>
+      <span>Дані</span>
+    </button>
+    <button class="nav-btn" onclick="switchTab('graph', this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+      </svg>
+      <span>Графік</span>
+    </button>
+    <button class="nav-btn" onclick="switchTab('analysis', this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="8"/>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        <line x1="11" y1="8" x2="11" y2="14"/>
+        <line x1="8" y1="11" x2="14" y2="11"/>
+      </svg>
+      <span>Аналіз</span>
+    </button>
+  </nav>
+
+  <!-- Modal overlay -->
+  <div id="modal-overlay" class="modal-overlay" onclick="closeModalOverlay(event)">
+    <div class="modal-box">
+      <div class="modal-hdr">
+        <span class="modal-title" id="modal-title"></span>
+        <button class="modal-close-btn" onclick="closeModal()">&#x2715;</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
